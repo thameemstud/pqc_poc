@@ -2,7 +2,7 @@
 """
 socket_chat.py
 
-A combined client-server socket programming script.
+A combined client-server socket programming script with bi-directional communication.
 Run in server mode:
     python3 socket_chat.py server --host 0.0.0.0 --port 65432
 
@@ -24,33 +24,82 @@ def handle_client(conn, addr):
     - addr: The address of the client.
     """
     print(f"[+] New connection from {addr}")
-    with conn:
-        while True:
-            try:
-                data = conn.recv(1024)  # Buffer size 1024 bytes
-                if not data:
-                    print(f"[-] No data received from {addr}. Closing connection.")
-                    break
-
-                message = data.decode('utf-8').strip()
-                print(f"[{addr}] {message}")
-
-                if message.lower() == 'exit':
-                    print(f"[!] Exit command received from {addr}. Closing connection.")
-                    break
-
-                # Send a response back to the client
-                response = f"Server received: {message}"
-                conn.sendall(response.encode('utf-8'))
-
-            except ConnectionResetError:
-                print(f"[!] Connection reset by {addr}.")
-                break
-            except Exception as e:
-                print(f"[!] An error occurred with {addr}: {e}")
-                break
-
+    
+    # Start threads for sending and receiving
+    receive_thread = threading.Thread(target=receive_messages, args=(conn, addr))
+    send_thread = threading.Thread(target=send_messages, args=(conn, addr))
+    
+    receive_thread.start()
+    send_thread.start()
+    
+    # Wait for both threads to finish
+    receive_thread.join()
+    send_thread.join()
+    
     print(f"[-] Connection with {addr} closed.")
+
+def receive_messages(conn, addr):
+    """
+    Receives messages from the client.
+
+    Parameters:
+    - conn: The socket connection object.
+    - addr: The address of the client.
+    """
+    while True:
+        try:
+            data = conn.recv(1024)  # Buffer size 1024 bytes
+            if not data:
+                print(f"[-] No data received from {addr}. Closing connection.")
+                break
+
+            message = data.decode('utf-8').strip()
+            print(f"\n[Client {addr}]: {message}")
+
+            if message.lower() == 'exit':
+                print(f"[!] Exit command received from {addr}.")
+                break
+
+        except ConnectionResetError:
+            print(f"[!] Connection reset by {addr}.")
+            break
+        except Exception as e:
+            print(f"[!] An error occurred while receiving data from {addr}: {e}")
+            break
+
+    # Close the connection
+    conn.close()
+
+def send_messages(conn, addr):
+    """
+    Sends messages to the client.
+
+    Parameters:
+    - conn: The socket connection object.
+    - addr: The address of the client.
+    """
+    while True:
+        try:
+            message = input(f"[You to {addr}]: ").strip()
+            if not message:
+                print("[!] Empty message. Please enter some text.")
+                continue
+
+            conn.sendall(message.encode('utf-8'))
+
+            if message.lower() == 'exit':
+                print("[*] Exit command sent. Closing connection.")
+                break
+
+        except BrokenPipeError:
+            print(f"[!] Broken pipe. Unable to send data to {addr}.")
+            break
+        except Exception as e:
+            print(f"[!] An error occurred while sending data to {addr}: {e}")
+            break
+
+    # Close the connection
+    conn.close()
 
 def start_server(host='0.0.0.0', port=65432):
     """
@@ -103,39 +152,79 @@ def start_client(server_host='127.0.0.1', server_port=65432):
 
     print(f"[+] Connected to server at {server_host}:{server_port}")
 
-    try:
-        while True:
-            message = input("Enter message (type 'exit' to close): ").strip()
+    # Start threads for sending and receiving
+    receive_thread = threading.Thread(target=receive_messages_client, args=(client_socket,))
+    send_thread = threading.Thread(target=send_messages_client, args=(client_socket,))
+
+    receive_thread.start()
+    send_thread.start()
+
+    # Wait for both threads to finish
+    receive_thread.join()
+    send_thread.join()
+
+    print("[-] Connection closed.")
+
+def receive_messages_client(conn):
+    """
+    Receives messages from the server.
+
+    Parameters:
+    - conn: The socket connection object.
+    """
+    while True:
+        try:
+            data = conn.recv(1024)  # Buffer size 1024 bytes
+            if not data:
+                print("\n[-] No data received from server. Closing connection.")
+                break
+
+            message = data.decode('utf-8').strip()
+            print(f"\n[Server]: {message}")
+
+            if message.lower() == 'exit':
+                print("[!] Exit command received from server.")
+                break
+
+        except ConnectionResetError:
+            print("\n[!] Connection reset by server.")
+            break
+        except Exception as e:
+            print(f"\n[!] An error occurred while receiving data from server: {e}")
+            break
+
+    # Close the connection
+    conn.close()
+
+def send_messages_client(conn):
+    """
+    Sends messages to the server.
+
+    Parameters:
+    - conn: The socket connection object.
+    """
+    while True:
+        try:
+            message = input("[You to Server]: ").strip()
             if not message:
                 print("[!] Empty message. Please enter some text.")
                 continue
 
-            client_socket.sendall(message.encode('utf-8'))
+            conn.sendall(message.encode('utf-8'))
 
             if message.lower() == 'exit':
                 print("[*] Exit command sent. Closing connection.")
                 break
 
-            try:
-                data = client_socket.recv(1024)
-                if not data:
-                    print("[!] No response from server. Closing connection.")
-                    break
+        except BrokenPipeError:
+            print("\n[!] Broken pipe. Unable to send data to server.")
+            break
+        except Exception as e:
+            print(f"\n[!] An error occurred while sending data to server: {e}")
+            break
 
-                response = data.decode('utf-8')
-                print(f"[Server]: {response}")
-            except ConnectionResetError:
-                print("[!] Connection reset by server.")
-                break
-            except Exception as e:
-                print(f"[!] An error occurred: {e}")
-                break
-
-    except KeyboardInterrupt:
-        print("\n[!] Client shutting down.")
-    finally:
-        client_socket.close()
-        print("[-] Connection closed.")
+    # Close the connection
+    conn.close()
 
 def parse_arguments():
     """
@@ -144,7 +233,7 @@ def parse_arguments():
     Returns:
     - args: The parsed arguments.
     """
-    parser = argparse.ArgumentParser(description="Python Socket Client-Server Chat")
+    parser = argparse.ArgumentParser(description="Python Socket Client-Server Chat with Bi-Directional Communication")
     subparsers = parser.add_subparsers(dest='mode', help='Mode to run the script in: server or client')
 
     # Server sub-command
